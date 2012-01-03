@@ -1,0 +1,9 @@
+name = scanner
+description = Scans and replaces data in database.
+core = 7.x
+package = AAA
+files[] = scanner.module
+files[] = scanner.install
+
+
+

@@ -1,0 +1,444 @@
+<?php
+/**
+ * Implements hook_menu().
+ */
+function scanner_menu() {
+  $items['admin/scanner'] = array(
+    'title' => 'Scanner',
+    'description' => 'Scanner process begin.',
+    'page callback' => 'scanner_overview', 
+    'access callback' => TRUE,		
+    'type' => MENU_NORMAL_ITEM,
+  );
+  $items['admin/scanner/scan'] = array(
+    'title' => 'Scan',
+    'access callback' => TRUE,
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => 0,
+  );
+  $items['admin/scanner/view'] = array(
+    'title' => 'view data',
+    'page callback' => 'scanner_view_data', 
+    'access callback' => TRUE,
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 1,
+  ); 
+  $items['admin/scanner/report'] = array(
+    'title' => 'report',
+    'page callback' => 'scanner_view_report',
+    'access callback' => TRUE,
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 3,
+  ); 
+  $items['admin/scanner/update'] = array(
+    'title' => 'update database',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('scanner_update_database_form'),
+    'access callback' => TRUE,
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 4,
+  ); 
+  $items['admin/scanner/reset'] = array(
+    'title' => 'reset scanner',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('scanner_reset_form'),
+    'access callback' => TRUE,
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 5,
+  ); 
+  return $items;
+}
+
+/**
+ * implements hook_permission().
+ */
+ /*
+function scanner_permission() {
+  return array(
+    'administer scanner' => array(
+      'title' => t('Administer scanner'), 
+      'description' => t('Perform scan and replace of database data.'),
+    ),
+  );
+}
+*/
+
+/**
+* Page callback for admin/scanner.
+*/
+function scanner_overview() {
+
+/* check status */
+$status = db_query("SELECT stage FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
+
+/* switch action */
+    switch ($status) {
+      case '1': 
+        $output = drupal_get_form('scanner_search_form'); 
+      break;
+      case '2':
+        $output = drupal_get_form('scanner_search_form'); 
+      break;
+			default:
+        $output = drupal_get_form('scanner_start_scan_form');
+    }
+
+ return $output;
+
+}
+
+/* Form Builder start scan */
+function scanner_start_scan_form() {
+    $form['scanner_start_scan_text'] = array(
+      '#markup' => "<p>First we copy the contents of table field_data_body to scan_fields table.</p><p>Then we will search and replace data in the scan_fields table.</p><p>Finally, update filed data-body with new data.</p>",
+    );
+		$form['scanner_start_scan_button'] = array(
+      '#type' => 'submit',
+      '#value' => 'lets begin',
+    ); 
+		
+		return $form;
+}
+
+function scanner_start_scan_form_submit($form, &$form_state) {
+	
+ // copy field table populate scanfield table	
+  $query = db_select('field_data_body', 'f'); 
+  $query 
+    ->fields('f', array('entity_id', 'revision_id', 'body_value'))
+    ->orderBy('f.entity_id', 'ASC');
+  
+  $result = $query->execute(); 
+  
+  // build array of values
+  $values = array(); 
+  foreach ($result as $row) {
+    $values[] = array(
+      'snid' => $row->entity_id,
+      'body_value' => $row->body_value,
+			'srid' => $row->revision_id,
+    );
+  }
+  
+  // insert values into scanner table
+  $query = db_insert('scanner_fields')->fields(array('snid', 'body_value', 'srid'));
+  foreach ($values as $record) {
+    $query->values($record);
+  }
+  $query->execute();
+	
+	/* insert session details */
+  $sessiontime = date('U');
+	
+  $query = db_insert('scanner_session')
+    ->fields(array('stage' => 1, 'start_date'=> $sessiontime))
+    ->execute();
+}
+
+function scanner_search_form() {
+
+$spid = db_query("SELECT spid FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
+
+	$form['scanner_scan_session_id'] = array(
+    '#type' => 'value',
+		'#value' => $spid,
+  ); 	
+
+	$form['scanner_search_form_regex'] = array(
+    '#markup' => "<p>\ is used to escape characters . \ + * ? [ ^ ] $ ( ) { } = ! < > | : -</p><p>http://www\.jgsoft\.com/ becomes '/http:\/\/www\.jgsoft\.com\//</p><p>'~<img [^>]* />~' for images</p><p>[a-zA-Z0-9._-]+@[a-zA-Z0-9-]+\.[a-zA-Z.]{2,5}</p>",
+  ); 	
+ 
+	$form['scanner_search_form_search_string'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Search string'),
+    '#required' => TRUE,
+    '#description' => t('The string that you want to search for.'),
+  );	
+	$form['scanner_search_form_replace_string'] = array(
+    '#type' => 'textarea',
+    '#size' => 200,
+    '#title' => t('Replace string'),
+    '#required' => FALSE,
+    '#description' => t('The string that you want to insert.'),
+  );	
+  $form['scanner_search_form_button'] = array(
+    '#type' => 'submit',
+    '#value' => 'Search and Replace',
+  ); 
+
+  return $form;
+
+}
+
+function scanner_search_form_submit($form, &$form_state) {
+  $session = $form_state['values']['scanner_scan_session_id'];
+  $search = $form_state['values']['scanner_search_form_search_string'];
+  $replace = $form_state['values']['scanner_search_form_replace_string'];
+	
+  $swapcount = 0;
+	$count = 0;
+	
+  $query = db_select('scanner_fields', 'sf'); 
+  $query 
+    ->fields('sf', array('snid', 'body_value'))
+    ->orderBy('snid', 'ASC');
+  
+  $result = $query->execute(); 
+  
+  foreach ($result as $row) { 	
+	  $body = $row->body_value;
+		$snid = $row->snid;
+	
+    // $newbody = str_replace($search, $replace, $body, $count);	for a string replace
+    // $newbody = preg_replace("/" . preg_quote($search) . "/i", "/" . preg_quote($replace) . "/", $body,'-1', $count); // for a replace of a string with special regex escaped case insensitive
+		$newbody = preg_replace("/" . $search . "/i", $replace , $body,'-1', $count); // for a replace of a regex string case insensitive
+		
+		if ($count >= 1) {
+		  $query = db_update('scanner_fields')
+		  ->fields(array('body_value' => $newbody, 'contains_flag' => 1))
+      ->condition('snid', $row->snid)
+		  ->execute();	
+					
+		$query = db_insert('scanner_replacements')->fields(array('spid' => $session, 'search_term' => $search, 'replace_term'=> $replace, 'snid' => $snid));
+    $query->execute();
+		
+		$swapcount = $swapcount + $count;
+		
+    }			
+  } 
+  if ($swapcount >= 1) {
+    $query = db_update('scanner_session')
+      ->condition('spid', $session)
+      ->fields(array('stage' => 2))
+      ->execute();  
+	}
+	drupal_set_message(t('@search was replaced with @replace @swapcount times', array('@search' => $search, '@replace' => $replace, '@swapcount' => $swapcount)));
+}
+
+function scanner_view_data() {
+  $rows = array();
+
+  $query = db_select('scanner_fields', 'sf'); 
+  $query 
+    ->fields('sf', array('snid', 'body_value'))
+    ->orderBy('snid', 'ASC');
+  
+  $result = $query->execute(); 
+  
+  // build array of values
+  $values = array(); 
+  foreach ($result as $row) { 	
+	  $body = $row->body_value;
+		$body = str_replace('<', '&lt;', $body);
+		$body = str_replace('>', '&gt;', $body);
+		$body = "<code><pre>" . $body . "</pre></code>";
+	
+    $rows[] = array($row->snid, $body);		
+  } 
+  $header = array('Node id', 'Body');
+	
+	$output = array(
+    '#theme' => 'table',
+    '#rows' => $rows,
+    '#header' => $header,
+  );
+	
+	return $output;
+}
+
+function scanner_view_report() {
+$status = db_query("SELECT stage FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
+$spid = db_query("SELECT spid FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
+
+  if ($status >= 2){
+	  //show report
+		$query = db_select('scanner_replacements', 'sr'); 
+    $query 
+    ->fields('sr', array('search_term', 'replace_term', 'snid'))
+		->condition('spid', $spid)
+    ->orderBy('snid', 'ASC');
+  
+    $result = $query->execute(); 
+    $rows= array();
+    // build array of values
+    foreach ($result as $row) { 	
+		  $search = $row->search_term;
+		  $search = str_replace('<', '&lt;', $search);
+		  $search = str_replace('>', '&gt;', $search);		
+		  $search = "<code><pre>" . $search . "</pre></code>";
+			
+		  $replace = $row->replace_term;
+		  $replace = str_replace('<', '&lt;', $replace);
+		  $replace = str_replace('>', '&gt;', $replace);		
+		  $replace = "<code><pre>" . $replace . "</pre></code>";
+				
+      $rows[] = array($row->snid,$search ,$replace );		
+    } 
+    $header = array('Node id', 'Searched', 'replaced');
+	
+	  $output = array(
+      '#theme' => 'table',
+      '#rows' => $rows,
+      '#header' => $header,
+    );
+	}
+	else{
+	  $output = "<p>There are no reports now</p>";
+	}
+	return $output;
+}
+
+function scanner_update_database_form($form, &$form_state) {
+  $spid = db_query("SELECT spid FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
+  $status = db_query("SELECT stage FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
+	
+  // $status = db_query("SELECT stage FROM {scanner_session} WHERE spid = :lid", array(':lid' => '1'))->fetchField(); 
+  if ($status == 2){
+  /*  $form['scanner_update_database_submit'] = array(
+      '#type' => 'submit',
+      '#value' => 'Update database',
+		  '#title' => t('Update database'),
+      '#description' => t('This cannot be undone.'),
+    );
+  */ 
+		$form['scanner_scan_session_id'] = array(
+    '#type' => 'value',
+		'#value' => $spid,
+    ); 
+	
+	
+    return confirm_form(
+      $form,
+	  	t('Are you sure your want to update database?'),
+			'admin/scanner',
+	  	t('This action cannot be undone!'),
+	  	t('Update database'),
+		  t('Cancel')
+    );
+  }
+	else {
+	  $header = array('S', 'M', 'Tu', 'W', 'Th', 'F', 'S');
+    $rows = array();
+    // first row
+    $rows [] = array(1, 2, 3, 4, 5, 6, 7);
+
+    $form['table'] = array(
+      '#value' => theme('table', $header, $rows),
+      '#weight' => 0,
+    );
+	  
+    $form['scanner_update_database_submit'] = array(
+      '#markup' => '<p>There are no changes made.</p>',	
+	  );
+		
+	  return $form;
+	}	
+}
+
+function scanner_update_database_form_submit($form, &$form_state) {
+
+  $spid = $form_state['values']['scanner_scan_session_id'];
+
+  // update field_revisions-body
+  $query = db_select('scanner_fields', 'sf'); 
+  $query 
+    ->fields('sf', array('snid', 'body_value'))
+		->condition('contains_flag', '1')
+    ->orderBy('snid', 'ASC');
+  
+  $result = $query->execute(); 
+
+	$values = array(); 
+  foreach ($result as $row) {
+    $newbody = $row->body_value;
+		$enid = $row->snid;	
+  
+    db_update('field_data_body')
+      ->fields(array(
+      'body_value' => $newbody,
+    ))
+      ->condition('entity_id', $enid)
+      ->execute();
+  }
+	
+  // update field_revisions-body
+  $query = db_select('scanner_fields', 'sf'); 
+  $query 
+    ->fields('sf', array('srid', 'body_value'))
+		->condition('contains_flag', '1')
+    ->orderBy('snid', 'ASC');
+  
+  $result = $query->execute(); 
+
+	$values = array(); 
+  foreach ($result as $row) {
+    $newbody = $row->body_value;
+		$enid = $row->srid;	
+  
+    db_update('field_revision_body')
+      ->fields(array(
+      'body_value' => $newbody,
+    ))
+      ->condition('revision_id', $enid)
+      ->execute();
+  }
+ 
+  $sessionendtime = date('U');  
+	
+  $query = db_update('scanner_session')
+    ->condition('spid', $spid)
+    ->fields(array('stage' => 3, 'finished_date' => $sessionendtime))
+    ->execute();
+
+	
+	$query = db_delete('scanner_fields')
+    ->execute();
+ 
+	drupal_set_message(t('Database updated')); 
+  
+}
+
+function scanner_reset_form($form, &$form_state) {
+  $spid = db_query("SELECT spid FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
+  $status = db_query("SELECT stage FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
+	
+  if ($status == 2){
+		$form['scanner_reset_session_id'] = array(
+    '#type' => 'value',
+		'#value' => $spid,
+    ); 
+	
+	
+    return confirm_form(
+      $form,
+	  	t('Are you sure your want to reset scanner?'),
+			'admin/scanner',
+	  	t('This action cannot be undone!'),
+	  	t('Reset scanner database'),
+		  t('Cancel')
+    );
+  }
+	else {
+		$form['scanner_scan_reset_no'] = array(
+    '#markup' => '<p>No changes have been made</p>',
+    ); 	
+		
+		return $form;
+	}
+}
+	
+function scanner_reset_form_submit($form, &$form_state) {
+
+  $spid = $form_state['values']['scanner_reset_session_id'];
+  $sessionendtime = date('U'); 
+	
+  $query = db_update('scanner_session')
+    ->condition('spid', $spid)
+    ->fields(array('stage' => 3, 'finished_date' => $sessionendtime))
+    ->execute();
+
+	$query = db_delete('scanner_fields')
+    ->execute();
+ 
+	drupal_set_message(t('Scanner has been reset')); 	
+}

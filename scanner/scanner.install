@@ -1,0 +1,120 @@
+<?php
+/**
+ * implements hook_schema()
+ */
+
+function scanner_schema() {
+  $schema = array();
+
+  $schema['scanner_fields'] = array(
+    'description' => 'Contains fields as they are being modified.',
+    'fields' => array(
+      'sid' => array(
+        'type' => 'serial',
+        'description' => 'A database primary key to ensure uniqueness.',
+        'not null' => TRUE,
+      ),
+      'snid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'this fields entity_id',
+      ), 
+      'srid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'this fields revision_id',
+      ),
+      'body_value' => array(
+        'description' => 'The data.',
+        'type' => 'text',
+        'size' => 'big',
+        'not null' => FALSE,
+      ),
+			'contains_flag' => array(
+        'description' => 'A boolean indicating whether this data contains the search string',
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+      ),			
+    ),
+		'primary key' => array('sid'),
+  );
+	
+  $schema['scanner_session'] = array(
+    'description' => 'Store process information for scans.',
+    'fields' => array(
+		  'spid' => array(
+        'type' => 'serial',
+        'description' => 'A database primary key to ensure uniqueness.',
+        'not null' => TRUE,
+      ),
+      'start_date' => array(
+        'type' => 'int',
+        'description' => 'A unix timestamp when scan began.',
+        'not null' => TRUE,
+				'default' => 0,
+      ),
+			'finished_date' => array(
+        'type' => 'int',
+        'description' => 'A Unix timestamp when datbase was updated.',
+        'not null' => FALSE,
+      ),
+			'stage' => array(
+        'type' => 'int',
+        'description' => 'A record progress of current scan.',
+        'not null' => TRUE,
+				'default' => 0,
+      ),
+    ),
+		'primary key' => array('spid'),
+  );
+	
+	$schema['scanner_replacements'] = array(
+    'description' => 'Stores all replacements for each scan session.',
+    'fields' => array(
+		  'tid' => array(
+        'type' => 'serial',
+        'description' => 'A database primary key to ensure uniqueness.',
+        'not null' => TRUE,
+      ),
+		  'spid' => array(
+        'type' => 'int',
+        'description' => 'Scan session id from {scanner_session} table.',
+        'not null' => TRUE,
+				'default' => 0,
+      ),
+			'search_term' => array(
+        'type' => 'text',
+				'size' => 'big',
+        'description' => 'A Unix timestamp when datbase was updated.',
+      ),
+			'replace_term' => array(
+        'type' => 'text',
+				'size' => 'big',
+        'description' => 'A record progress of current scan.',
+      ),
+			'snid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'this fields snid from {scan_fields} table',
+      ), 
+    ),
+		'primary key' => array('tid'),
+  );
+
+  return $schema;
+}
+
+/**
+ * implements hook_install()
+ */
+function scanner_install() {
+ 
+ $query = db_insert('scanner_session')->fields(array('stage' => 0));
+  $query->execute();
+ 
+}
