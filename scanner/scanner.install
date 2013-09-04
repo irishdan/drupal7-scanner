@@ -68,6 +68,13 @@ function scanner_schema() {
         'not null' => TRUE,
 				'default' => 0,
       ),
+      'field' => array(
+        'type' => 'varchar',
+        'length' => 128,
+        'description' => 'The field which was scanned',
+        'not null' => TRUE,
+				'default' => 'body',
+      ),
     ),
 		'primary key' => array('spid'),
   );

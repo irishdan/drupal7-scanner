@@ -92,6 +92,13 @@ function scanner_start_scan_form() {
     $form['scanner_start_scan_text'] = array(
       '#markup' => "<p>First we copy the contents of table field_data_body to scan_fields table.</p><p>Then we will search and replace data in the scan_fields table.</p><p>Finally, update filed data-body with new data.</p>",
     );
+    $form['scanner_field_select'] = array(
+    	'#type' => 'select',
+    	'#options' => array(
+    		'body' => 'Body',
+    		'field_description' => 'Field description',
+    	),
+    );
 		$form['scanner_start_scan_button'] = array(
       '#type' => 'submit',
       '#value' => 'lets begin',
@@ -101,11 +108,20 @@ function scanner_start_scan_form() {
 }
 
 function scanner_start_scan_form_submit($form, &$form_state) {
+
+	//dpm($form_state['values']['scanner_field_select']);
+	$scanfield =  $form_state['values']['scanner_field_select']; // body or field_description
 	
+	// field_data_body - body_value
+	// field_data_field_description - field_description_value
+	
+	$db = 'field_data_' . $scanfield;
+	$dbfv = $scanfield . '_value';
+
  // copy field table populate scanfield table	
-  $query = db_select('field_data_body', 'f'); 
+  $query = db_select($db, 'f'); 
   $query 
-    ->fields('f', array('entity_id', 'revision_id', 'body_value'))
+    ->fields('f', array('entity_id', 'revision_id', $dbfv))
     ->orderBy('f.entity_id', 'ASC');
   
   $result = $query->execute(); 
@@ -115,10 +131,12 @@ function scanner_start_scan_form_submit($form, &$form_state) {
   foreach ($result as $row) {
     $values[] = array(
       'snid' => $row->entity_id,
-      'body_value' => $row->body_value,
+      'body_value' => $row->$dbfv,
 			'srid' => $row->revision_id,
     );
   }
+  
+  
   
   // insert values into scanner table
   $query = db_insert('scanner_fields')->fields(array('snid', 'body_value', 'srid'));
@@ -131,13 +149,14 @@ function scanner_start_scan_form_submit($form, &$form_state) {
   $sessiontime = date('U');
 	
   $query = db_insert('scanner_session')
-    ->fields(array('stage' => 1, 'start_date'=> $sessiontime))
+    ->fields(array('stage' => 1, 'start_date'=> $sessiontime, 'field' => $scanfield))
     ->execute();
 }
 
 function scanner_search_form() {
 
-$spid = db_query("SELECT spid FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
+	$spid = db_query("SELECT spid FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
+	$field = db_query("SELECT field FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
 
 	$form['scanner_scan_session_id'] = array(
     '#type' => 'value',
@@ -147,6 +166,16 @@ $spid = db_query("SELECT spid FROM {scanner_session} ORDER BY spid DESC LIMIT 1"
 	$form['scanner_search_form_regex'] = array(
     '#markup' => "<p>\ is used to escape characters . \ + * ? [ ^ ] $ ( ) { } = ! < > | : -</p><p>http://www\.jgsoft\.com/ becomes '/http:\/\/www\.jgsoft\.com\//</p><p>'~<img [^>]* />~' for images</p><p>[a-zA-Z0-9._-]+@[a-zA-Z0-9-]+\.[a-zA-Z.]{2,5}</p>",
   ); 	
+  
+  
+  $form['scanner_selected_field'] = array(
+    '#markup' => "<h3>Selected Field: ".$field."</h3>",
+  ); 
+  
+  $form['scanner_field'] = array(
+    '#type' => "hidden",
+    '#value' => $field,
+  );
  
 	$form['scanner_search_form_search_string'] = array(
     '#type' => 'textarea',
@@ -174,6 +203,7 @@ function scanner_search_form_submit($form, &$form_state) {
   $session = $form_state['values']['scanner_scan_session_id'];
   $search = $form_state['values']['scanner_search_form_search_string'];
   $replace = $form_state['values']['scanner_search_form_replace_string'];
+  $field = $form_state['values']['scanner_field'];
 	
   $swapcount = 0;
 	$count = 0;
@@ -212,7 +242,11 @@ function scanner_search_form_submit($form, &$form_state) {
       ->fields(array('stage' => 2))
       ->execute();  
 	}
-	drupal_set_message(t('@search was replaced with @replace @swapcount times', array('@search' => $search, '@replace' => $replace, '@swapcount' => $swapcount)));
+	
+	// num of nodes
+	$non = db_query("SELECT count(*) FROM {scanner_fields} WHERE {contains_flag} = 1")->fetchField();
+
+	drupal_set_message(t('@search was replaced with @replace @swapcount times<br>@non nodes affected', array('@search' => $search, '@replace' => $replace, '@swapcount' => $swapcount, '@non'=>$non)));
 }
 
 function scanner_view_data() {
@@ -291,6 +325,7 @@ $spid = db_query("SELECT spid FROM {scanner_session} ORDER BY spid DESC LIMIT 1"
 function scanner_update_database_form($form, &$form_state) {
   $spid = db_query("SELECT spid FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
   $status = db_query("SELECT stage FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
+  $field = db_query("SELECT field FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
 	
   // $status = db_query("SELECT stage FROM {scanner_session} WHERE spid = :lid", array(':lid' => '1'))->fetchField(); 
   if ($status == 2){
@@ -305,8 +340,12 @@ function scanner_update_database_form($form, &$form_state) {
     '#type' => 'value',
 		'#value' => $spid,
     ); 
-	
-	
+    
+    $form['scanner_field'] = array(
+    '#type' => 'hidden',
+		'#value' => $field,
+    );
+		
     return confirm_form(
       $form,
 	  	t('Are you sure your want to update database?'),
@@ -317,16 +356,6 @@ function scanner_update_database_form($form, &$form_state) {
     );
   }
 	else {
-	  $header = array('S', 'M', 'Tu', 'W', 'Th', 'F', 'S');
-    $rows = array();
-    // first row
-    $rows [] = array(1, 2, 3, 4, 5, 6, 7);
-
-    $form['table'] = array(
-      '#value' => theme('table', $header, $rows),
-      '#weight' => 0,
-    );
-	  
     $form['scanner_update_database_submit'] = array(
       '#markup' => '<p>There are no changes made.</p>',	
 	  );
@@ -338,6 +367,7 @@ function scanner_update_database_form($form, &$form_state) {
 function scanner_update_database_form_submit($form, &$form_state) {
 
   $spid = $form_state['values']['scanner_scan_session_id'];
+  $field = $form_state['values']['scanner_field'];
 
   // update field_revisions-body
   $query = db_select('scanner_fields', 'sf'); 
@@ -353,10 +383,13 @@ function scanner_update_database_form_submit($form, &$form_state) {
     $newbody = $row->body_value;
 		$enid = $row->snid;	
   
-    db_update('field_data_body')
-      ->fields(array(
-      'body_value' => $newbody,
-    ))
+		// field_data_body - body_value -field_revision_body
+	  // field_data_field_description - field_description_value - field_revision_field_description
+		$table = 'field_data_' . $field;
+		$column = $field . '_value';
+		
+    db_update($table)
+      ->fields(array($column => $newbody))
       ->condition('entity_id', $enid)
       ->execute();
   }
@@ -375,7 +408,7 @@ function scanner_update_database_form_submit($form, &$form_state) {
     $newbody = $row->body_value;
 		$enid = $row->srid;	
   
-    db_update('field_revision_body')
+    db_update('field_revision_' . $field)
       ->fields(array(
       'body_value' => $newbody,
     ))
