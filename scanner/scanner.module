@@ -410,7 +410,7 @@ function scanner_update_database_form_submit($form, &$form_state) {
   
     db_update('field_revision_' . $field)
       ->fields(array(
-      'body_value' => $newbody,
+      $field.'_value' => $newbody,
     ))
       ->condition('revision_id', $enid)
       ->execute();
@@ -435,7 +435,7 @@ function scanner_reset_form($form, &$form_state) {
   $spid = db_query("SELECT spid FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
   $status = db_query("SELECT stage FROM {scanner_session} ORDER BY spid DESC LIMIT 1")->fetchField(); 
 	
-  if ($status == 2){
+  //if ($status == 2){
 		$form['scanner_reset_session_id'] = array(
     '#type' => 'value',
 		'#value' => $spid,
@@ -450,14 +450,14 @@ function scanner_reset_form($form, &$form_state) {
 	  	t('Reset scanner database'),
 		  t('Cancel')
     );
-  }
-	else {
+  //}
+	/*else {
 		$form['scanner_scan_reset_no'] = array(
     '#markup' => '<p>No changes have been made</p>',
     ); 	
 		
 		return $form;
-	}
+	}*/
 }
 	
 function scanner_reset_form_submit($form, &$form_state) {
